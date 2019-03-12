@@ -1,0 +1,17 @@
+{
+  "name": "websocket_rmq_demo",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "amqplib": "^0.5.3",
+    "uuid": "^3.3.2",
+    "ws": "^6.1.4"
+  }
+}
