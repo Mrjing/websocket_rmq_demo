@@ -1,6 +1,7 @@
 const websocketServer = require("ws").Server;
 const amqp = require("amqplib");
 const wss = new websocketServer({ port: 3000 });
+const uuidv1 = require("uuid/v1");
 
 let mqCon = null;
 let channel = null;
@@ -66,14 +67,19 @@ function consumeMsg(wsClient, collection) {
             let msgContent = {
               msgData: {
                 type: "queueMsg",
-                data: msgValue,
-                env,
-                openId,
-                collection
+                data: {
+                  msgValue,
+                  env,
+                  openId,
+                  collection,
+                  msgSeq: msgValue
+                }
               },
-              msgSeq: msgValue
+              msgId: uuidv1()
             };
-            let tempMsgObj = (toAckQueueMsg[`${openId}_${env}`] = {});
+            toAckQueueMsg[`${openId}_${env}`] =
+              toAckQueueMsg[`${openId}_${env}`] || {};
+            let tempMsgObj = toAckQueueMsg[`${openId}_${env}`];
             tempMsgObj[collection] = {};
             tempMsgObj[collection][msgValue] = msgContent;
 
@@ -122,7 +128,8 @@ wss.on("connection", ws => {
       ws.send(
         JSON.stringify({
           msgData: {
-            type: "ack"
+            type: "ack",
+            data: {}
           },
           msgId: msgObj.msgId
         })
@@ -130,10 +137,10 @@ wss.on("connection", ws => {
     }
 
     if (msgObj.msgData.type === "queueAck") {
-      console.log("received: %s", msgObj.msgSeq);
       // 收到当前连接下队列消息的确认
-      let { msgSeq, msgData } = msgObj;
-      let { env, openId, collection } = msgData;
+      let { msgData } = msgObj;
+      let { env, openId, collection, msgSeq } = msgData.data;
+      console.log("received: %s", msgSeq);
       let currentCol = toAckQueueMsg[`${openId}_${env}`][collection];
       if (currentCol && currentCol[msgSeq]) {
         currentCol[msgSeq] = null;

@@ -20,7 +20,7 @@ amqp
       function sendNumber() {
         // pushToMQ(number++);
 
-        // 1~10000的序号 随机分发
+        // 1~20的序号 随机分发
         pushToMQ(Math.floor(Math.random() * Math.floor(20)));
         setTimeout(sendNumber, 2000);
       }
