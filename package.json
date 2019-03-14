@@ -11,7 +11,8 @@
   "license": "ISC",
   "devDependencies": {
     "amqplib": "^0.5.3",
+    "node-cache": "^4.2.0",
     "uuid": "^3.3.2",
-    "ws": "^6.1.4"
+    "ws": "^6.2.0"
   }
 }

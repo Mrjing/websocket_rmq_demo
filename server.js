@@ -11,6 +11,8 @@ const exchange = "test"; // 转发器名
 
 const toAckQueueMsg = {};
 
+let queueMap = {};
+
 // 连接rabbitMQ服务
 amqp
   .connect(rabbitMQURL)
@@ -44,69 +46,91 @@ function consumeMsg(wsClient, collection) {
       });
   }
 
+  function consumeChannel(channel, queue) {
+    channel.consume(
+      queue,
+      msg => {
+        let { openId, env } = wsClient.userInfoObj;
+        let msgValue = msg.content.toString();
+        let { consumerTag, routingKey } = msg.fields;
+        console.log(`待消费msg ${msgValue}`);
+        if (wsClient.readyState !== 1) {
+          console.log(`当前连接未open ${openId}.${env}.${collection}`);
+          channel.nack(msg);
+          channel.cancel(consumerTag);
+          return;
+        }
+        // 消息暂存toAckQueueMsg (消息序号用整数消息值)
+        // let { openId, env } = wsClient.userInfoObj;
+        // let msgValue = msg.content.toString();
+        let msgContent = {
+          msgData: {
+            type: "queueMsg",
+            data: {
+              msgValue,
+              env,
+              openId,
+              collection,
+              msgSeq: msgValue
+            }
+          },
+          msgId: uuidv1()
+        };
+        toAckQueueMsg[`${openId}_${env}`] =
+          toAckQueueMsg[`${openId}_${env}`] || {};
+        let tempMsgObj = toAckQueueMsg[`${openId}_${env}`];
+        tempMsgObj[collection] = tempMsgObj[collection] || {};
+        tempMsgObj[collection][msgValue] = msgContent;
+
+        let msgTimeoutId = null;
+        function sendAndCheckAck(msgContent) {
+          wsClient.send(JSON.stringify(msgContent), () => {
+            // 定时检查是否收到当前临时队列下msgSeq对应的ack
+            console.log(`发送queue msg ${msgValue}后等待ack`);
+            msgTimeoutId = setTimeout(() => {
+              if (
+                toAckQueueMsg[`${openId}_${env}`][collection][msgValue] !==
+                undefined
+              ) {
+                sendAndCheckAck(msgContent);
+              } else {
+                console.log(`完成queue msg ${msgValue} 消费 ack`);
+                channel.ack(msg);
+                clearTimeout(msgTimeoutId);
+              }
+            }, 2000);
+          });
+        }
+        sendAndCheckAck(msgContent);
+      },
+      { noAck: false }
+    );
+  }
+
   function consume(channel) {
     console.log("consume");
     // wsClient.MQChannel = channel;
-    channel.assertExchange(exchange, "direct", { durable: true });
-    channel
-      .assertQueue("", { exclusive: true }) // 分配临时队列
-      .then(q => {
-        channel.bindQueue(q.queue, exchange, collection);
-        console.log("bindQueue ok");
-        channel.consume(
-          q.queue,
-          msg => {
-            if (wsClient.readyState !== 1) {
-              console.log(`当前连接未open`);
-              return;
-            }
+    let { openId, env } = wsClient.userInfoObj;
+    // let currentQueueName = `${openId}.${env}.${collection}`;
+    let currentQueueKey = `${openId}.${env}.${collection}`;
+    if (!channel.checkExchange(exchange)) {
+      channel.assertExchange(exchange, "direct", { durable: true });
+    }
 
-            // 消息暂存toAckQueueMsg (消息序号用整数消息值)
-            let { openId, env } = wsClient.userInfoObj;
-            let msgValue = msg.content.toString();
-            let msgContent = {
-              msgData: {
-                type: "queueMsg",
-                data: {
-                  msgValue,
-                  env,
-                  openId,
-                  collection,
-                  msgSeq: msgValue
-                }
-              },
-              msgId: uuidv1()
-            };
-            toAckQueueMsg[`${openId}_${env}`] =
-              toAckQueueMsg[`${openId}_${env}`] || {};
-            let tempMsgObj = toAckQueueMsg[`${openId}_${env}`];
-            tempMsgObj[collection] = {};
-            tempMsgObj[collection][msgValue] = msgContent;
-
-            let msgTimeoutId = null;
-            function sendAndCheckAck(msgContent) {
-              wsClient.send(JSON.stringify(msgContent), () => {
-                // 定时检查是否收到当前临时队列下msgSeq对应的ack
-                console.log("发送queue msg后等待ack");
-                msgTimeoutId = setTimeout(() => {
-                  if (toAckQueueMsg[`${openId}_${env}`][collection][msgValue]) {
-                    // 仍待确认
-                    sendAndCheckAck(msgContent);
-                  } else {
-                    console.log("完成queue msg ack");
-                    clearTimeout(msgTimeoutId);
-                  }
-                }, 2000);
-              });
-            }
-            sendAndCheckAck(msgContent);
-          },
-          { noAck: false }
-        );
-      })
-      .catch(err => {
-        console.log("err:", err);
-      });
+    if (queueMap[currentQueueKey]) {
+      consumeChannel(channel, queueMap[currentQueueKey]);
+    } else {
+      channel
+        .assertQueue(currentQueueKey, { durable: true }) // 分配持久队列
+        .then(q => {
+          channel.bindQueue(q.queue, exchange, currentQueueKey);
+          console.log("bindQueue ok");
+          consumeChannel(channel, q.queue);
+        })
+        .catch(err => {
+          console.log("err:", err);
+        });
+    }
   }
 }
 
@@ -140,7 +164,7 @@ wss.on("connection", ws => {
       // 收到当前连接下队列消息的确认
       let { msgData } = msgObj;
       let { env, openId, collection, msgSeq } = msgData.data;
-      console.log("received: %s", msgSeq);
+      console.log("received queueAck: %s", msgSeq);
       let currentCol = toAckQueueMsg[`${openId}_${env}`][collection];
       if (currentCol && currentCol[msgSeq]) {
         currentCol[msgSeq] = null;

@@ -1,8 +1,10 @@
 const args = process.argv.slice(2);
 const WebSocket = require("ws");
 const uuidv1 = require("uuid/v1");
+const NodeCache = require("node-cache");
 
 let toAckMsgs = {}; // 发送后待确认的消息
+const queueMsgCache = new NodeCache();
 let localQueueMsgs = {}; //
 
 function WSClient({
@@ -56,7 +58,7 @@ WSClient.prototype.sendMsgCheckAck = function(msg) {
       // 定时检查是否收到同msgId对应的ack
       console.log("发送msg后待ack...");
       msgTimeoutId = setTimeout(() => {
-        if (toAckMsgs[msg.msgId]) {
+        if (toAckMsgs[msg.msgId] !== undefined) {
           // 仍待确认
           sendAndCheckAck(msg);
         } else {
@@ -122,23 +124,21 @@ WSClient.prototype.initEventHandle = function() {
 
     if (msgObj.msgData.type === "queueMsg") {
       let { msgData } = msgObj;
-      let { env, openId, collection, msgSeq } = msgData.data;
-      // 收到queueMsg时，需保证队列消息有序并去重
-      // 发送queue msg ack
-      let msgAck = this.createMsg({
-        msgId: uuidv1(),
-        msgType: "queueAck",
-        data: {
-          env,
-          openId,
-          collection,
-          msgSeq
-        }
-      });
-      this.send(JSON.stringify(msgAck));
+      let { env, openId, collection } = msgData.data;
+      // 收到queueMsg时，需保证队列消息有序并去重, 如果消息未按序达，丢弃
+      const currentQueueSeqKey = `${openId}.${env}.${collection}.msgSeq`;
+
+      let value = queueMsgCache.get(currentQueueSeqKey);
+      if (value == undefined) {
+        console.log("currentQueueSeqKey", currentQueueSeqKey, value);
+        queueMsgCache.set(currentQueueSeqKey, {
+          msgSeq: 0
+        });
+      }
+      this.dealMultiQueueMsg(currentQueueSeqKey, msgObj);
 
       // 消息去重
-      dealMultiQueueMsg(msgObj);
+      // dealMultiQueueMsg(msgObj);
     }
   });
 
@@ -151,6 +151,8 @@ WSClient.prototype.initEventHandle = function() {
     console.log("close code: ", code);
     console.log("close reason: ", reason);
     this.reconnect();
+
+    //
   });
 
   this.ws.on("pong", () => {
@@ -160,7 +162,51 @@ WSClient.prototype.initEventHandle = function() {
   });
 };
 
-WSClient.prototype.dealMultiQueueMsg = function(msgObj) {};
+WSClient.prototype.dealMultiQueueMsg = function(queueSeqKey, msgObj) {
+  let { msgData, msgId } = msgObj;
+  let { env, openId, collection, msgSeq } = msgData.data;
+
+  const queueMsgId = `${openId}.${env}.${collection}.${msgId}`;
+
+  let value = queueMsgCache.get(queueMsgId);
+  if (value == undefined) {
+    // 判断新消息序号，是否丢掉消息
+    let seqValue = queueMsgCache.get(queueSeqKey);
+    if (seqValue.msgSeq == parseInt(msgSeq)) {
+      // 序号正确， 缓存消息及序号后发送queue msg ack
+      queueMsgCache.set(queueSeqKey, {
+        msgSeq: seqValue.msgSeq + 1
+      });
+      queueMsgCache.set(queueMsgId, {
+        msgValue: msgSeq
+      });
+
+      // 发送queue msg ack
+      let msgAck = this.createMsg({
+        msgId: uuidv1(),
+        msgType: "queueAck",
+        data: {
+          env,
+          openId,
+          collection,
+          msgSeq
+        }
+      });
+      this.send(JSON.stringify(msgAck));
+      //
+      const keys = queueMsgCache.keys();
+      const allKeyValue = queueMsgCache.mget(keys);
+      console.log("本地缓存key:", allKeyValue);
+    } else {
+      console.log(
+        `本地消息序号${seqValue.msgSeq} 传入消息序号${msgSeq} 不匹配 丢弃`
+      );
+    }
+  } else {
+    // 重复消息直接丢掉
+    console.log(`${queueMsgId} 消息重复`);
+  }
+};
 
 WSClient.prototype.reconnect = function() {
   this.ws = null;
@@ -198,50 +244,6 @@ WSClient.prototype.ping = function() {
 WSClient.prototype.close = function() {
   this.ws.close();
 };
-
-function dealMultiQueueMsg(msgObj) {
-  // 区分当前消息对应的collection
-  let { msgData } = msgObj;
-  let { collection, msgSeq } = msgData.data;
-
-  msgSeq = parseInt(msgSeq);
-  if (!localQueueMsgs[collection]) {
-    localQueueMsgs[collection] = {
-      seq: 0,
-      msgs: []
-    };
-  }
-
-  let flag = false,
-    currentQueueMsg = localQueueMsgs[collection],
-    msgArr = currentQueueMsg["msgs"],
-    localMsgSeq = currentQueueMsg["seq"],
-    i;
-  length = msgArr.length;
-  if (msgSeq !== localMsgSeq) {
-    // 收到的消息序号不对，丢掉
-    console.log("收到消息序号错误，丢弃:", msgSeq);
-    return;
-  }
-  currentQueueMsg["seq"]++;
-  msgArr.push(msgSeq);
-
-  // for (i = length - 1; i >= 0; i--) {
-  //   if (msgArr[i] < msgSeq) {
-  //     break;
-  //   }
-  //   if (msgArr[i] === msgSeq) {
-  //     flag = true;
-  //     break;
-  //   }
-  // }
-
-  // if (!flag) {
-  //   msgArr.splice(i + 1, 0, msgSeq);
-  // }
-
-  console.log("客户端的消息数组:", JSON.stringify(localQueueMsgs));
-}
 
 let wsIns = new WSClient({
   pingTimeout: 5000,

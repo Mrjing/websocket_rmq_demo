@@ -1,5 +1,4 @@
 var amqp = require("amqplib");
-var args = process.argv.slice(2);
 
 const collectionNames = ["c1", "c2", "c3"];
 const rabbitMQURL = "amqp://localhost";
@@ -7,6 +6,30 @@ const exchange = "test";
 let mqCon = null;
 let channel = null;
 let number = 0;
+let sendNumberTimeout;
+
+const testNumberArr = [
+  19,
+  1,
+  0,
+  2,
+  3,
+  8,
+  5,
+  4,
+  7,
+  6,
+  11,
+  12,
+  14,
+  13,
+  15,
+  18,
+  17,
+  10,
+  9,
+  16
+];
 
 amqp
   .connect(rabbitMQURL)
@@ -17,12 +40,18 @@ amqp
   .then(conn => {
     conn.createChannel().then(ch => {
       ch.assertExchange(exchange, "direct", { durable: true });
+
       function sendNumber() {
         // pushToMQ(number++);
 
+        if (number == 20) {
+          clearTimeout(sendNumberTimeout);
+          return;
+        }
         // 1~20的序号 随机分发
-        pushToMQ(Math.floor(Math.random() * Math.floor(20)));
-        setTimeout(sendNumber, 2000);
+        pushToMQ(testNumberArr[number]);
+        number++;
+        sendNumberTimeout = setTimeout(sendNumber, 1000);
       }
 
       sendNumber();
@@ -38,7 +67,9 @@ function pushToMQ(message) {
     return;
   }
 
-  const collection = collectionNames[Math.floor(Math.random() * Math.floor(3))];
+  // let seq = Math.floor(Math.random() * Math.floor(3));
+  let seq = 0;
+  const collection = `${seq + 1}.test.${collectionNames[seq]}`;
 
   message = JSON.stringify(message);
   if (channel) {
@@ -53,7 +84,7 @@ function pushToMQ(message) {
       .then(ch => {
         channel = ch;
         channel.assertExchange(exchange, "direct", { durable: true });
-        console.log("publish msg and collection:", message);
+        console.log("publish msg and collection:", message, collection);
         channel.publish(exchange, collection, Buffer.from(message), {
           persistent: true
         });
