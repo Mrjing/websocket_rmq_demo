@@ -84,10 +84,23 @@ function consumeMsg(wsClient, collection) {
 
         let msgTimeoutId = null;
         function sendAndCheckAck(msgContent) {
+          console.log("wsClients:************", Array.from(wss.clients).length);
+
           wsClient.send(JSON.stringify(msgContent), () => {
             // 定时检查是否收到当前临时队列下msgSeq对应的ack
+            console.log(
+              "current wsclient:",
+              wsClient.userInfoObj.timeStamp,
+              wsClient.readyState
+            );
             console.log(`发送queue msg ${msgValue}后等待ack`);
+
             msgTimeoutId = setTimeout(() => {
+              if (wsClient.readyState !== 1) {
+                clearTimeout(msgTimeoutId);
+                channel.nack(msg);
+                return;
+              }
               if (
                 toAckQueueMsg[`${openId}_${env}`][collection][msgValue] !==
                 undefined
@@ -112,11 +125,12 @@ function consumeMsg(wsClient, collection) {
     // wsClient.MQChannel = channel;
     let { openId, env } = wsClient.userInfoObj;
     // let currentQueueName = `${openId}.${env}.${collection}`;
+
     let currentQueueKey = `${openId}.${env}.${collection}`;
     if (!channel.checkExchange(exchange)) {
       channel.assertExchange(exchange, "direct", { durable: true });
     }
-
+    console.log("currentQueueKey:", currentQueueKey);
     if (queueMap[currentQueueKey]) {
       consumeChannel(channel, queueMap[currentQueueKey]);
     } else {
@@ -144,7 +158,8 @@ wss.on("connection", ws => {
       if (!ws.userInfoObj) {
         ws.userInfoObj = {
           openId,
-          env
+          env,
+          timeStamp: new Date().getTime()
         };
       }
       consumeMsg(ws, collection);
@@ -171,9 +186,24 @@ wss.on("connection", ws => {
         delete currentCol[msgSeq];
       }
     }
+
+    if (msgObj.msgData.type === "ping") {
+      // 收到ping，回pong
+      let pongMsg = {
+        msgData: {
+          type: "pong",
+          data: null
+        },
+        msgId: null
+      };
+      console.log("receive ping....");
+      ws.send(JSON.stringify(pongMsg));
+    }
   });
 
-  ws.on("ping", () => {
-    console.log("receive ping");
-  });
+  ws.on("close", () => {});
+
+  // ws.on("ping", () => {
+  //   console.log("receive ping");
+  // });
 });

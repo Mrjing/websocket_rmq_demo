@@ -9,5 +9,33 @@
     <script src="./lscache.js"></script>
     <script src="./client.js"></script>
   </head>
-  <body></body>
+  <body>
+    <!-- openId<input type="text" name="" id="openId" /> env<input
+      type="text"
+      name=""
+      id="env"
+    />
+    collection<input type="text" name="" id="collection" />
+    <button id="connect">建立连接</button> -->
+    <!-- <script>
+      var btn = document.getElementById("connect");
+      btn.onclick = function() {
+        var openId = document.getElementById("openId").value;
+        var env = document.getElementById("env").value;
+        var collection = document.getElementById("collection").value;
+
+        console.log(openId, env, collection);
+        let wsIns = new WSClient({
+          pingTimeout: 5000,
+          pongTimeout: 5000,
+          reconnectTimeout: 3000,
+          wsURL: "ws://localhost:3000",
+          // params: { openId: args[1], env: args[2], collection: args[0] }
+          params: { openId, env, collection }
+        });
+
+        wsIns.createWsCon();
+      };
+    </script> -->
+  </body>
 </html>

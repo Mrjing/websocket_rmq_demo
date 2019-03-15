@@ -1,11 +1,11 @@
-const args = process.argv.slice(2);
-const WebSocket = require("ws");
-const uuidv1 = require("uuid/v1");
-const NodeCache = require("node-cache");
+// const args = process.argv.slice(2);
+// const WebSocket = require("ws");
+// const uuidv1 = require("uuid/v1");
+// const NodeCache = require("node-cache");
 
 let toAckMsgs = {}; // 发送后待确认的消息
-const queueMsgCache = new NodeCache();
-let localQueueMsgs = {}; //
+// const queueMsgCache = new NodeCache();
+const queueMsgCache = lscache;
 
 function WSClient({
   pingTimeout,
@@ -96,7 +96,8 @@ WSClient.prototype.initEventHandle = function() {
   // const { openId, env, collection } = this.params;
   console.log("connect starting....");
 
-  this.ws.on("open", res => {
+  this.ws.addEventListener("open", res => {
+    // this.ws.on("open", res => {
     // 心跳重置
     this.heart();
     console.log("connect open....");
@@ -108,11 +109,11 @@ WSClient.prototype.initEventHandle = function() {
     this.sendMsgCheckAck(msg);
   });
 
-  this.ws.on("message", msg => {
+  this.ws.addEventListener("message", msg => {
+    // this.ws.on("message", msg => {
     // 心跳重置
     this.heart();
-
-    let msgObj = JSON.parse(msg);
+    let msgObj = JSON.parse(msg.data);
     if (msgObj.msgData.type === "ack") {
       //收到ack消息后，toAckMsgs中删除该消息
       if (toAckMsgs[msgObj.msgId]) {
@@ -140,26 +141,32 @@ WSClient.prototype.initEventHandle = function() {
       // 消息去重
       // dealMultiQueueMsg(msgObj);
     }
+
+    if (msgObj.msgData.type === "pong") {
+      console.log("client receive pong....");
+      //心跳重置
+      this.heart();
+    }
   });
 
-  this.ws.on("error", err => {
+  this.ws.addEventListener("error", err => {
+    // this.ws.on("error", err => {
     console.log("client receive error:", err);
     this.reconnect();
   });
 
-  this.ws.on("close", (code, reason) => {
+  this.ws.addEventListener("close", (code, reason) => {
+    // this.ws.on("close", (code, reason) => {
     console.log("close code: ", code);
     console.log("close reason: ", reason);
     this.reconnect();
-
-    //
   });
 
-  this.ws.on("pong", () => {
-    console.log("client receive pong");
-    //心跳重置
-    this.heart();
-  });
+  // this.ws.on("pong", () => {
+  //   console.log("client receive pong");
+  //   //心跳重置
+  //   this.heart();
+  // });
 };
 
 WSClient.prototype.dealMultiQueueMsg = function(queueSeqKey, msgObj) {
@@ -172,6 +179,17 @@ WSClient.prototype.dealMultiQueueMsg = function(queueSeqKey, msgObj) {
   if (value == undefined) {
     // 判断新消息序号，是否丢掉消息
     let seqValue = queueMsgCache.get(queueSeqKey);
+    // 发送queue msg ack
+    let msgAck = this.createMsg({
+      msgId: uuidv1(),
+      msgType: "queueAck",
+      data: {
+        env,
+        openId,
+        collection,
+        msgSeq
+      }
+    });
     if (seqValue.msgSeq == parseInt(msgSeq)) {
       // 序号正确， 缓存消息及序号后发送queue msg ack
       queueMsgCache.set(queueSeqKey, {
@@ -181,26 +199,22 @@ WSClient.prototype.dealMultiQueueMsg = function(queueSeqKey, msgObj) {
         msgValue: msgSeq
       });
 
-      // 发送queue msg ack
-      let msgAck = this.createMsg({
-        msgId: uuidv1(),
-        msgType: "queueAck",
-        data: {
-          env,
-          openId,
-          collection,
-          msgSeq
-        }
-      });
       this.send(JSON.stringify(msgAck));
       //
-      const keys = queueMsgCache.keys();
-      const allKeyValue = queueMsgCache.mget(keys);
-      console.log("本地缓存key:", allKeyValue);
+      // const keys = queueMsgCache.keys();
+      // const allKeyValue = queueMsgCache.mget(keys);
+      // console.log("本地缓存:", queueMsgCache);
+      console.log(`本地消息序号${seqValue.msgSeq} 传入消息序号${msgSeq} 匹配`);
     } else {
-      console.log(
-        `本地消息序号${seqValue.msgSeq} 传入消息序号${msgSeq} 不匹配 丢弃`
-      );
+      // 判断传入消息序号是否大于当前序号
+      if (seqValue.msgSeq < parseInt(msgSeq)) {
+        console.log(
+          `本地消息序号${seqValue.msgSeq} 传入消息序号${msgSeq} 不匹配 丢弃`
+        );
+      } else {
+        // 小于当前序号，表明该消息已收到，回ACK
+        this.send(JSON.stringify(msgAck));
+      }
     }
   } else {
     // 重复消息直接丢掉
@@ -238,19 +252,24 @@ WSClient.prototype.ping = function() {
   if (!this.checkWSOpen()) {
     return;
   }
-  this.ws.ping();
+  let pingMsg = this.createMsg({ msgId: null, msgType: "ping", data: null });
+  this.ws.send(JSON.stringify(pingMsg));
+  // this.ws.ping();
 };
 
 WSClient.prototype.close = function() {
   this.ws.close();
 };
 
+window.WSClient = WSClient;
+
 let wsIns = new WSClient({
   pingTimeout: 5000,
   pongTimeout: 5000,
   reconnectTimeout: 3000,
   wsURL: "ws://localhost:3000",
-  params: { openId: args[1], env: args[2], collection: args[0] }
+  // params: { openId: args[1], env: args[2], collection: args[0] }
+  params: { openId: "1", env: "test", collection: "c1" }
 });
 
 wsIns.createWsCon();

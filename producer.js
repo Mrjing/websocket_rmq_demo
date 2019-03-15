@@ -70,14 +70,20 @@ function pushToMQ(message) {
   // let seq = Math.floor(Math.random() * Math.floor(3));
   let seq = 0;
   const collection = `${seq + 1}.test.${collectionNames[seq]}`;
+  // const collectionC1 = `${seq + 1}.test.${collectionNames[seq]}`;
+  // const collectionC2 = `${seq + 2}.test.${collectionNames[seq]}`;
 
   message = JSON.stringify(message);
   if (channel) {
     channel.assertExchange(exchange, "direct", { durable: true });
     console.log("publish msg and collection:", message, collection);
+    // console.log("publish msg and collection:", message, collectionC2);
     channel.publish(exchange, collection, Buffer.from(message), {
       persistent: true
     });
+    // channel.publish(exchange, collectionC2, Buffer.from(message), {
+    //   persistent: true
+    // });
   } else {
     mqCon
       .createChannel()
@@ -85,9 +91,13 @@ function pushToMQ(message) {
         channel = ch;
         channel.assertExchange(exchange, "direct", { durable: true });
         console.log("publish msg and collection:", message, collection);
+        // console.log("publish msg and collection:", message, collectionC2);
         channel.publish(exchange, collection, Buffer.from(message), {
           persistent: true
         });
+        // channel.publish(exchange, collectionC2, Buffer.from(message), {
+        //   persistent: true
+        // });
       })
       .catch(err => {
         console.log("err:", err);
